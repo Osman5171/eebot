@@ -9,15 +9,15 @@ app.use(cors());
 let browser;
 let page;
 
-// সার্ভার চালু হওয়ার সময় একবার ব্রাউজার খুলে লগইন করে রাখবে
+// সার্ভার চালু হওয়ার সময় একবার ব্রাউজার খুলে লগইন করে রাখবে
 async function initBrowser() {
     console.log("🚀 Initializing browser and logging in...");
     try {
-        if (browser) await browser.close(); // পুরোনো ব্রাউজার থাকলে বন্ধ করে দেওয়া
+        if (browser) await browser.close(); // পুরোনো ব্রাউজার থাকলে বন্ধ করে দেওয়া
 
         browser = await puppeteer.launch({ 
             headless: true, 
-            // Render-এ ইনস্টল করা ক্রোম খুঁজে পাওয়ার জন্য নিচের লাইনটি জরুরি
+            // Render-এ ইনস্টল করা ক্রোম খুঁজে পাওয়ার জন্য নিচের লাইনটি জরুরি
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
             args: [
                 '--no-sandbox', 
@@ -44,56 +44,60 @@ async function initBrowser() {
     }
 }
 
-// ইনিশিয়াল কল
+// ইনিশিয়াল কল
 initBrowser();
 
 app.get('/', (req, res) => res.send("Bot is active and running!"));
 
-app.post('/api/verify-cross-check', async (req, res) => {
+// 🔥 লক্ষ্য করুন: এখানে async ফাংশন ব্যবহার করা হয়নি, কারণ আমরা সাথে সাথে রিপ্লাই দেব!
+app.post('/api/verify-cross-check', (req, res) => {
     const targetTrxID = req.body.transaction_id;
     if (!targetTrxID) return res.status(400).json({ error: "No ID provided" });
 
-    console.log(`\n⚡ Checking ID: ${targetTrxID}`);
+    console.log(`\n⚡ Received ID: ${targetTrxID}. Replying instantly to Supabase...`);
 
-    try {
-        // সেশন চেক: যদি পেজ না থাকে বা লগআউট হয়ে যায়
-        if (!page || page.url().includes('login')) {
-            console.log("🔄 Session lost, re-logging in...");
-            await initBrowser();
-        }
+    // 🔥 মেইন ম্যাজিক: সুপাবেজকে ১ মিলি-সেকেন্ডে বিদায় করে দেওয়া হলো
+    res.json({ status: "PROCESSING", message: "Bot started checking in background" });
 
-        // ১. সরাসরি Used Transactions-এ গিয়ে চেক
-        await page.goto(`https://pay.eagleeyetopup.com/payment?search=${targetTrxID}`, { waitUntil: 'domcontentloaded' });
-        
-        const isUsed = await page.evaluate((id) => {
-            return document.body.innerText.includes(id);
-        }, targetTrxID);
-
-        if (isUsed) {
-            console.log(`🚫 ID: ${targetTrxID} is USED!`);
-            return res.json({ status: "USED" });
-        }
-
-        // ২. সরাসরি Store Data-তে গিয়ে ডিলিট
-        console.log(`✅ ID: ${targetTrxID} is CLEAN! Deleting from store...`);
-        await page.goto(`https://pay.eagleeyetopup.com/storedatum?search=${targetTrxID}`, { waitUntil: 'domcontentloaded' });
-        
+    // 🔥 এবার ব্যাকগ্রাউন্ডে ব্রাউজার খুলে আসল কাজ চলবে
+    (async () => {
         try {
-            // ডিলিট বাটনে ক্লিক
-            await page.click('button.btn-danger, .fa-trash');
-            console.log(`🗑️ Deleted ${targetTrxID}`);
-        } catch (e) {
-            console.log("⚠️ ID not found in store data, possibly already handled.");
+            // সেশন চেক: যদি পেজ না থাকে বা লগআউট হয়ে যায়
+            if (!page || page.url().includes('login')) {
+                console.log("🔄 Session lost, re-logging in...");
+                await initBrowser();
+            }
+
+            // ১. সরাসরি Used Transactions-এ গিয়ে চেক
+            await page.goto(`https://pay.eagleeyetopup.com/payment?search=${targetTrxID}`, { waitUntil: 'domcontentloaded' });
+            
+            const isUsed = await page.evaluate((id) => {
+                return document.body.innerText.includes(id);
+            }, targetTrxID);
+
+            if (isUsed) {
+                console.log(`🚫 ID: ${targetTrxID} is USED! (Ignored)`);
+                return; // আইডি ইউজড হলে এখানেই কাজ শেষ
+            }
+
+            // ২. সরাসরি Store Data-তে গিয়ে ডিলিট
+            console.log(`✅ ID: ${targetTrxID} is CLEAN! Deleting from store...`);
+            await page.goto(`https://pay.eagleeyetopup.com/storedatum?search=${targetTrxID}`, { waitUntil: 'domcontentloaded' });
+            
+            try {
+                // ডিলিট বাটনে ক্লিক
+                await page.click('button.btn-danger, .fa-trash');
+                console.log(`🗑️ SUCCESSFULLY DELETED ${targetTrxID}`);
+            } catch (e) {
+                console.log("⚠️ ID not found in store data, possibly already handled.");
+            }
+
+        } catch (error) {
+            console.log("⚠️ Error details:", error.message);
+            // মারাত্মক এরর হলে ব্রাউজার রিস্টার্ট করা
+            initBrowser();
         }
-
-        return res.json({ status: "CLEAN" });
-
-    } catch (error) {
-        console.log("⚠️ Error details:", error.message);
-        // মারাত্মক এরর হলে ব্রাউজার রিস্টার্ট করা
-        initBrowser();
-        return res.status(500).json({ error: "Verification server encountered an error" });
-    }
+    })(); // <-- ব্যাকগ্রাউন্ড টাস্ক শেষ
 });
 
 // Render সাধারণত ১০০০ পোর্টে রান করতে বলে অথবা process.env.PORT ব্যবহার করে
