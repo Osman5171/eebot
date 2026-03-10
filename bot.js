@@ -4,93 +4,83 @@ const cors = require('cors');
 
 const app = express();
 app.use(express.json());
-app.use(cors()); // React ওয়েবসাইট থেকে রিকোয়েস্ট অ্যালাউ করার জন্য
+app.use(cors());
 
-// 🟢 সার্ভার সারাজীবন সজাগ রাখার জন্য একটি সিম্পল রাউট (Cron-job এর জন্য)
-app.get('/', (req, res) => {
-    res.send("🚀 Bot is awake and running!");
-});
+let browser;
+let page;
 
-app.post('/api/verify-cross-check', async (req, res) => {
-    const targetTrxID = req.body.transaction_id;
-    
-    if (!targetTrxID) {
-        return res.status(400).json({ error: "Transaction ID is required" });
-    }
-
-    console.log(`\n⚡ FAST Check Started for ID: ${targetTrxID}`);
-
-    const browser = await puppeteer.launch({ 
+// সার্ভার চালু হওয়ার সময় একবার ব্রাউজার খুলে লগইন করে রাখবে
+async function initBrowser() {
+    console.log("🚀 Initializing browser and logging in...");
+    browser = await puppeteer.launch({ 
         headless: true, 
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
     });
-    const page = await browser.newPage();
-
-    // পপ-আপ অটো-অ্যাকসেপ্ট করা
-    page.on('dialog', async dialog => {
-        await dialog.accept(); 
-    });
-
+    page = await browser.newPage();
+    
     try {
-        // ১. লগইন করা (networkidle2 এর বদলে domcontentloaded ব্যবহার করা হয়েছে স্পিডের জন্য)
         await page.goto('https://pay.eagleeyetopup.com/login', { waitUntil: 'domcontentloaded' });
-        
-        await page.waitForSelector('input[type="email"], input[type="text"], input[name="email"]');
-        await page.type('input[type="email"], input[type="text"], input[name="email"]', 'nac009hid@gmail.com');
-        
-        await page.waitForSelector('input[type="password"], input[name="password"]');
+        await page.type('input[type="email"], input[name="email"]', 'nac009hid@gmail.com');
         await page.type('input[type="password"], input[name="password"]', '123456');
-        
         await Promise.all([
             page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
             page.click('button[type="submit"]')
         ]);
+        console.log("✅ Login successful! Session saved.");
+    } catch (err) {
+        console.log("❌ Initial login failed:", err.message);
+    }
+}
 
-        // ২. Used Transactions পেজে গিয়ে চেক করা যে আইডিটা অলরেডি ইউজড কিনা
-        console.log("📂 Checking 'Used Transactions' page...");
-        await page.goto('https://pay.eagleeyetopup.com/payment', { waitUntil: 'domcontentloaded' });
-        await page.waitForSelector('input[type="search"], input[placeholder*="Search"]');
-        await page.type('input[type="search"], input[placeholder*="Search"]', targetTrxID);
-        await new Promise(resolve => setTimeout(resolve, 1000)); // সার্চের জন্য মাত্র ১ সেকেন্ড অপেক্ষা
+initBrowser();
 
-        // পেজের ভেতর লেখাগুলো চেক করা
-        const pageText = await page.evaluate(() => document.body.innerText);
+app.get('/', (req, res) => res.send("Bot is active!"));
 
-        if (pageText.includes(targetTrxID)) {
-            // আইডিটি ২ নম্বর সাইটে পাওয়া গেছে, তার মানে এটি USED!
-            console.log(`🚫 ID ${targetTrxID} is already USED in Top-up!`);
-            await browser.close();
-            return res.json({ status: "USED", message: "This transaction is already used." });
+app.post('/api/verify-cross-check', async (req, res) => {
+    const targetTrxID = req.body.transaction_id;
+    if (!targetTrxID) return res.status(400).json({ error: "No ID" });
+
+    console.log(`\n⚡ Checking ID: ${targetTrxID}`);
+
+    try {
+        // সেশন চেক: যদি কোনো কারণে লগআউট হয়ে যায়
+        if (page.url().includes('login')) {
+            await initBrowser();
         }
 
-        // ৩. যদি USED না হয়, তার মানে এটি CLEAN! এবার Store Data থেকে মুছে ফেলার পালা।
-        console.log("✅ ID is CLEAN! Going to 'Store Data' to delete it...");
-        await page.goto('https://pay.eagleeyetopup.com/storedatum', { waitUntil: 'domcontentloaded' });
-        await page.waitForSelector('input[type="search"], input[placeholder*="Search"]');
-        await page.type('input[type="search"], input[placeholder*="Search"]', targetTrxID);
-        await new Promise(resolve => setTimeout(resolve, 1000)); // মাত্র ১ সেকেন্ড অপেক্ষা
-
-        try {
-            // ডিলিট বাটনে ক্লিক করা
-            await page.click('button.btn-danger, a.btn-danger, .fa-trash, .text-danger, [title*="Delete"]');
-            console.log(`🗑️ Deleted ${targetTrxID} from Store Data.`);
-        } catch (err) {
-            console.log(`⚠️ Note: ID not found in Store Data. It might be a new valid ID.`);
-        }
-
-        await browser.close();
+        // ১. সরাসরি Used Transactions-এ গিয়ে চেক (সবচেয়ে দ্রুত)
+        await page.goto(`https://pay.eagleeyetopup.com/payment?search=${targetTrxID}`, { waitUntil: 'domcontentloaded' });
         
-        // React-কে সিগন্যাল দেওয়া যে আইডি একদম ফ্রেশ
-        return res.json({ status: "CLEAN", message: "Transaction is valid." });
+        const isUsed = await page.evaluate((id) => {
+            return document.body.innerText.includes(id);
+        }, targetTrxID);
+
+        if (isUsed) {
+            console.log(`🚫 USED!`);
+            return res.json({ status: "USED" });
+        }
+
+        // ২. সরাসরি Store Data-তে গিয়ে ডিলিট
+        console.log("✅ CLEAN! Deleting...");
+        await page.goto(`https://pay.eagleeyetopup.com/storedatum?search=${targetTrxID}`, { waitUntil: 'domcontentloaded' });
+        
+        try {
+            // ডিলিট বাটনের জন্য অপেক্ষা না করে সরাসরি ক্লিক করার চেষ্টা
+            await page.click('button.btn-danger, .fa-trash');
+            console.log(`🗑️ Deleted ${targetTrxID}`);
+        } catch (e) {
+            console.log("⚠️ ID not in store data, it's a new one.");
+        }
+
+        return res.json({ status: "CLEAN" });
 
     } catch (error) {
-        console.log("⚠️ Error: ", error.message);
-        await browser.close();
-        return res.status(500).json({ error: "Server error", details: error.message });
+        console.log("⚠️ Error:", error.message);
+        // এরর হলে ব্রাউজার রিস্টার্ট করে নেওয়া ভালো
+        initBrowser();
+        return res.status(500).json({ error: "Server error" });
     }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🟢 Live Check API is running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🟢 Super-Fast API on port ${PORT}`));
