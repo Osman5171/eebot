@@ -6,6 +6,11 @@ const app = express();
 app.use(express.json());
 app.use(cors()); // React ওয়েবসাইট থেকে রিকোয়েস্ট অ্যালাউ করার জন্য
 
+// 🟢 সার্ভার সারাজীবন সজাগ রাখার জন্য একটি সিম্পল রাউট (Cron-job এর জন্য)
+app.get('/', (req, res) => {
+    res.send("🚀 Bot is awake and running!");
+});
+
 app.post('/api/verify-cross-check', async (req, res) => {
     const targetTrxID = req.body.transaction_id;
     
@@ -13,11 +18,11 @@ app.post('/api/verify-cross-check', async (req, res) => {
         return res.status(400).json({ error: "Transaction ID is required" });
     }
 
-    console.log(`\n🔍 Live Check Started for ID: ${targetTrxID}`);
+    console.log(`\n⚡ FAST Check Started for ID: ${targetTrxID}`);
 
     const browser = await puppeteer.launch({ 
         headless: true, 
-        args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
     });
     const page = await browser.newPage();
 
@@ -27,23 +32,26 @@ app.post('/api/verify-cross-check', async (req, res) => {
     });
 
     try {
-        // ১. লগইন করা
-        await page.goto('https://pay.eagleeyetopup.com/login', { waitUntil: 'networkidle2' });
+        // ১. লগইন করা (networkidle2 এর বদলে domcontentloaded ব্যবহার করা হয়েছে স্পিডের জন্য)
+        await page.goto('https://pay.eagleeyetopup.com/login', { waitUntil: 'domcontentloaded' });
+        
         await page.waitForSelector('input[type="email"], input[type="text"], input[name="email"]');
-        await page.type('input[type="email"], input[type="text"], input[name="email"]', 'nac009hid@gmail.com', { delay: 30 });
+        await page.type('input[type="email"], input[type="text"], input[name="email"]', 'nac009hid@gmail.com');
+        
         await page.waitForSelector('input[type="password"], input[name="password"]');
-        await page.type('input[type="password"], input[name="password"]', '123456', { delay: 30 });
+        await page.type('input[type="password"], input[name="password"]', '123456');
+        
         await Promise.all([
-            page.waitForNavigation({ waitUntil: 'networkidle2' }),
+            page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
             page.click('button[type="submit"]')
         ]);
 
         // ২. Used Transactions পেজে গিয়ে চেক করা যে আইডিটা অলরেডি ইউজড কিনা
         console.log("📂 Checking 'Used Transactions' page...");
-        await page.goto('https://pay.eagleeyetopup.com/payment', { waitUntil: 'networkidle2' });
+        await page.goto('https://pay.eagleeyetopup.com/payment', { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('input[type="search"], input[placeholder*="Search"]');
-        await page.type('input[type="search"], input[placeholder*="Search"]', targetTrxID, { delay: 50 });
-        await new Promise(resolve => setTimeout(resolve, 2000)); // সার্চের জন্য ২ সেকেন্ড অপেক্ষা
+        await page.type('input[type="search"], input[placeholder*="Search"]', targetTrxID);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // সার্চের জন্য মাত্র ১ সেকেন্ড অপেক্ষা
 
         // পেজের ভেতর লেখাগুলো চেক করা
         const pageText = await page.evaluate(() => document.body.innerText);
@@ -57,10 +65,10 @@ app.post('/api/verify-cross-check', async (req, res) => {
 
         // ৩. যদি USED না হয়, তার মানে এটি CLEAN! এবার Store Data থেকে মুছে ফেলার পালা।
         console.log("✅ ID is CLEAN! Going to 'Store Data' to delete it...");
-        await page.goto('https://pay.eagleeyetopup.com/storedatum', { waitUntil: 'networkidle2' });
+        await page.goto('https://pay.eagleeyetopup.com/storedatum', { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('input[type="search"], input[placeholder*="Search"]');
-        await page.type('input[type="search"], input[placeholder*="Search"]', targetTrxID, { delay: 50 });
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await page.type('input[type="search"], input[placeholder*="Search"]', targetTrxID);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // মাত্র ১ সেকেন্ড অপেক্ষা
 
         try {
             // ডিলিট বাটনে ক্লিক করা
