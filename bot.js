@@ -1,11 +1,15 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
 const cors = require('cors'); 
-const fetch = require('node-fetch'); // যদি Node v18 এর নিচে হয়, তবে এটি লাগবে
+const fetch = require('node-fetch'); // Node v18+ হলে আলাদা করে লাগবে না, তবে থাকা ভালো
 
 const app = express();
 app.use(express.json());
 app.use(cors());
+
+// --- Supabase Config ---
+const SUPABASE_URL = "https://fqbyuqrdbbqjsminkxwk.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxYnl1cXJkYmJxanNtaW5reHdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NTQ0NjksImV4cCI6MjA4NTUzMDQ2OX0.Sz_fSsBaCd_7lObrzdUl95CNGgJ4LqYZsQVsbaEQSaA";
 
 let browser;
 let page;
@@ -61,7 +65,7 @@ async function initBrowser() {
 
 initBrowser();
 
-app.get('/', (req, res) => res.send("Stealth Bot + Interceptor is active!"));
+app.get('/', (req, res) => res.send("Stealth Bot + 2-Way Interceptor is active!"));
 
 /**
  * 🕵️‍♂️ REVERSE INTERCEPTOR: টপ-আপ সাইটে পেমেন্ট হলে ESP সাইটে ব্লক করা
@@ -69,37 +73,43 @@ app.get('/', (req, res) => res.send("Stealth Bot + Interceptor is active!"));
  */
 app.post('/api/reverse-interceptor', async (req, res) => {
     const payload = req.body;
-    // গেটওয়ে থেকে আসা ট্রানজেকশন আইডি খুঁজে বের করা
     const trxID = payload.transaction_id || payload.trx_id || payload.id;
 
     console.log(`\n🕵️‍♂️ INTERCEPTED: New Payment Signal! ID: ${trxID}`);
 
     if (trxID) {
         try {
-            console.log(`🚫 Blocking ID: ${trxID} in ESP Website (Supabase)...`);
+            console.log(`🚫 Blocking ID: ${trxID} in Supabase (blocked_transactions)...`);
             
-            /**
-             * 🔥 সুপাবেজে ডাটা পাঠানোর লজিক (নিচের কমেন্টটুকু আপনার সুপাবেজ ডাটা অনুযায়ী সেট করতে হবে)
-             * * await fetch('YOUR_SUPABASE_URL/rest/v1/used_transactions', {
-             * method: 'POST',
-             * headers: {
-             * 'apikey': 'YOUR_SUPABASE_ANON_KEY',
-             * 'Authorization': 'Bearer YOUR_SUPABASE_ANON_KEY',
-             * 'Content-Type': 'application/json'
-             * },
-             * body: JSON.stringify({ transaction_id: trxID, source: 'TOPUP_SITE_INTERCEPT' })
-             * });
-             */
-            
-            console.log(`✅ ID: ${trxID} successfully blacklisted in ESP DB.`);
+            // ১. সুপাবেজে ডাটা ইনসার্ট করা
+            const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/blocked_transactions`, {
+                method: 'POST',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({ 
+                    transaction_id: trxID, 
+                    source: 'TOPUP_SITE_INTERCEPT',
+                    raw_data: JSON.stringify(payload) // সব ডাটা ব্যাকআপ হিসেবে রাখা
+                })
+            });
+
+            if (supabaseRes.ok) {
+                console.log(`✅ ID: ${trxID} successfully blacklisted in Supabase.`);
+            } else {
+                console.log(`⚠️ Supabase Error (Status ${supabaseRes.status}). Check if table 'blocked_transactions' exists.`);
+            }
         } catch (err) {
             console.log("⚠️ ESP DB Update Error:", err.message);
         }
     }
 
-    // টপ-আপ সাইটে ডাটা ফরওয়ার্ড করা
+    // ২. টপ-আপ সাইটে অরিজিনাল ডাটা ফরওয়ার্ড করা
     try {
-        console.log(`➡️ Forwarding data to Top-up site secret webhook...`);
+        console.log(`➡️ Forwarding data to Top-up site...`);
         const topupWebhookUrl = "https://pay.eagleeyetopup.com/storesms/C44MTgzMzQyNjQ5ODYxNTUx";
         
         const response = await fetch(topupWebhookUrl, {
@@ -111,7 +121,6 @@ app.post('/api/reverse-interceptor', async (req, res) => {
         const result = await response.text();
         console.log(`🏁 Top-up site response: ${result}`);
         
-        // অরিজিনাল গেটওয়েকে উত্তর পাঠিয়ে দেওয়া
         res.status(200).send(result);
     } catch (error) {
         console.log("❌ Forwarding failed:", error.message);
@@ -143,7 +152,7 @@ app.post('/api/verify-cross-check', (req, res) => {
                     return; 
                 }
             } catch (navErr) {
-                console.log(`⚠️ Used Check timed out for ${targetTrxID}, moving to Store search.`);
+                console.log(`⚠️ Used Check timed out, moving to Store search.`);
             }
 
             console.log(`✅ ID: ${targetTrxID} is CLEAN. Searching Store Data...`);
@@ -181,6 +190,7 @@ app.post('/api/verify-cross-check', (req, res) => {
         }
     })();
 });
+
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🟢 Stealth Bot + Interceptor live on port ${PORT}`));
