@@ -9,97 +9,157 @@ app.use(cors());
 let browser;
 let page;
 
-// সার্ভার চালু হওয়ার সময় একবার ব্রাউজার খুলে লগইন করে রাখবে
+/**
+ * Initialize Browser in Stealth & Ultra-Fast Mode
+ */
 async function initBrowser() {
-    console.log("🚀 Initializing browser and logging in...");
+    console.log("🚀 Initializing browser in Stealth Desktop Mode...");
     try {
-        if (browser) await browser.close(); // পুরোনো ব্রাউজার থাকলে বন্ধ করে দেওয়া
+        if (browser) await browser.close(); 
 
         browser = await puppeteer.launch({ 
-            headless: true, 
-            // Render-এ ইনস্টল করা ক্রোম খুঁজে পাওয়ার জন্য নিচের লাইনটি জরুরি
+            headless: "new", 
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
                 '--disable-dev-shm-usage',
-                '--single-process' // মেমোরি বাঁচানোর জন্য
+                '--single-process',
+                '--window-size=1920,1080' // 🔥 ম্যাজিক ১: ফুল এইচডি স্ক্রিন সাইজ
             ] 
         });
         
         page = await browser.newPage();
+
+        // 🔥 ম্যাজিক ২: ওয়েবসাইটকে বোঝানো যে এটা উইন্ডোজ ১০ এর আসল ক্রোম ব্রাউজার
+        await page.setViewport({ width: 1920, height: 1080 });
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+        await page.setDefaultNavigationTimeout(30000); 
+
+        // GLOBAL DIALOG HANDLER: Always accept "Are you sure?" popups
+        page.on('dialog', async dialog => {
+            console.log(`[DIALOG] Auto-Accepted: ${dialog.message()}`);
+            await dialog.accept();
+        });
         
-        await page.goto('https://pay.eagleeyetopup.com/login', { waitUntil: 'domcontentloaded' });
-        await page.type('input[type="email"], input[name="email"]', 'nac009hid@gmail.com');
-        await page.type('input[type="password"], input[name="password"]', '123456');
+        // 🔥 Ultra-Fast Load (domcontentloaded)
+        await page.goto('https://pay.eagleeyetopup.com/login', { 
+            waitUntil: 'domcontentloaded',
+            timeout: 30000 
+        });
+
+        await page.type('input[type="email"]', 'nac009hid@gmail.com');
+        await page.type('input[type="password"]', '123456');
         
         await Promise.all([
-            page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
             page.click('button[type="submit"]')
         ]);
         
-        console.log("✅ Login successful! Session saved.");
+        console.log("✅ Login successful! Bot is ready as a REAL USER.");
     } catch (err) {
         console.log("❌ Initial login failed:", err.message);
     }
 }
 
-// ইনিশিয়াল কল
 initBrowser();
 
-app.get('/', (req, res) => res.send("Bot is active and running!"));
+app.get('/', (req, res) => res.send("Bot is active in Stealth & Ultra-Fast Mode!"));
 
-// 🔥 লক্ষ্য করুন: এখানে async ফাংশন ব্যবহার করা হয়নি, কারণ আমরা সাথে সাথে রিপ্লাই দেব!
+/**
+ * Targeted Deletion with Quick Retry Logic
+ */
 app.post('/api/verify-cross-check', (req, res) => {
     const targetTrxID = req.body.transaction_id;
     if (!targetTrxID) return res.status(400).json({ error: "No ID provided" });
 
-    console.log(`\n⚡ Received ID: ${targetTrxID}. Replying instantly to Supabase...`);
+    console.log(`\n⚡ Received ID: ${targetTrxID}. Processing Instantly...`);
 
-    // 🔥 মেইন ম্যাজিক: সুপাবেজকে ১ মিলি-সেকেন্ডে বিদায় করে দেওয়া হলো
-    res.json({ status: "PROCESSING", message: "Bot started checking in background" });
+    // Instant Response to Supabase
+    res.json({ status: "PROCESSING", message: `Searching for ID: ${targetTrxID}` });
 
-    // 🔥 এবার ব্যাকগ্রাউন্ডে ব্রাউজার খুলে আসল কাজ চলবে
     (async () => {
         try {
-            // সেশন চেক: যদি পেজ না থাকে বা লগআউট হয়ে যায়
             if (!page || page.url().includes('login')) {
                 console.log("🔄 Session lost, re-logging in...");
                 await initBrowser();
             }
 
-            // ১. সরাসরি Used Transactions-এ গিয়ে চেক
-            await page.goto(`https://pay.eagleeyetopup.com/payment?search=${targetTrxID}`, { waitUntil: 'domcontentloaded' });
-            
-            const isUsed = await page.evaluate((id) => {
-                return document.body.innerText.includes(id);
-            }, targetTrxID);
-
-            if (isUsed) {
-                console.log(`🚫 ID: ${targetTrxID} is USED! (Ignored)`);
-                return; // আইডি ইউজড হলে এখানেই কাজ শেষ
-            }
-
-            // ২. সরাসরি Store Data-তে গিয়ে ডিলিট
-            console.log(`✅ ID: ${targetTrxID} is CLEAN! Deleting from store...`);
-            await page.goto(`https://pay.eagleeyetopup.com/storedatum?search=${targetTrxID}`, { waitUntil: 'domcontentloaded' });
-            
+            // 1. Used Transactions Check (Fast)
             try {
-                // ডিলিট বাটনে ক্লিক
-                await page.click('button.btn-danger, .fa-trash');
-                console.log(`🗑️ SUCCESSFULLY DELETED ${targetTrxID}`);
-            } catch (e) {
-                console.log("⚠️ ID not found in store data, possibly already handled.");
+                await page.goto(`https://pay.eagleeyetopup.com/payment?search=${targetTrxID}`, { 
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000 
+                });
+                
+                const isUsed = await page.evaluate((id) => {
+                    return document.body.innerText.includes(id);
+                }, targetTrxID);
+
+                if (isUsed) {
+                    console.log(`🚫 ID: ${targetTrxID} is USED! Skipping deletion.`);
+                    return; 
+                }
+            } catch (navErr) {
+                console.log(`⚠️ Used Check timed out for ${targetTrxID}, moving to Store search.`);
             }
+
+            // 2. Start Quick Retry Loop (Max 3 attempts, 5s wait)
+            console.log(`✅ ID: ${targetTrxID} is CLEAN. Searching Store Data...`);
+            
+            const maxAttempts = 3; 
+            const waitTime = 5000; 
+
+            async function attemptDelete(attempt) {
+                if (attempt > maxAttempts) {
+                    console.log(`❌ Giving up! ID ${targetTrxID} not found after ${maxAttempts} attempts.`);
+                    return;
+                }
+
+                try {
+                    console.log(`🔍 [Attempt ${attempt}/${maxAttempts}] Searching for: ${targetTrxID}`);
+                    
+                    await page.goto(`https://pay.eagleeyetopup.com/storedatum?search=${targetTrxID}`, { 
+                        waitUntil: 'domcontentloaded',
+                        timeout: 30000 
+                    });
+
+                    // ২ সেকেন্ড অপেক্ষা টেবিল রেন্ডার হওয়ার জন্য
+                    await new Promise(r => setTimeout(r, 2000));
+
+                    const idExists = await page.evaluate((id) => {
+                        return document.body.innerText.includes(id);
+                    }, targetTrxID);
+
+                    if (idExists) {
+                        const deleteBtn = 'button.btn-danger, a.btn-danger, .fa-trash, [title="Delete"]';
+                        const button = await page.$(deleteBtn);
+                        if (button) {
+                            await page.click(deleteBtn);
+                            console.log(`🗑️ SUCCESS: Targeted ID ${targetTrxID} found and deleted!`);
+                        } else {
+                            console.log(`⚠️ ID found but Delete Button is missing for ${targetTrxID}`);
+                        }
+                        return; 
+                    } else {
+                        console.log(`⏳ ID ${targetTrxID} not found yet. Waiting 5s...`);
+                        setTimeout(() => attemptDelete(attempt + 1), waitTime);
+                    }
+
+                } catch (e) {
+                    console.log(`⚠️ Attempt ${attempt} error: ${e.message}. Retrying...`);
+                    setTimeout(() => attemptDelete(attempt + 1), waitTime);
+                }
+            }
+
+            attemptDelete(1);
 
         } catch (error) {
-            console.log("⚠️ Error details:", error.message);
-            // মারাত্মক এরর হলে ব্রাউজার রিস্টার্ট করা
-            initBrowser();
+            console.log("⚠️ Core Task Error:", error.message);
         }
-    })(); // <-- ব্যাকগ্রাউন্ড টাস্ক শেষ
+    })();
 });
 
-// Render সাধারণত ১০০০ পোর্টে রান করতে বলে অথবা process.env.PORT ব্যবহার করে
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🟢 Super-Fast API is live on port ${PORT}`));
+app.listen(PORT, () => console.log(`🟢 Stealth Bot is live on port ${PORT}`));

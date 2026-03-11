@@ -1,0 +1,30 @@
+name: Deploy Bot to VPS
+
+on:
+  push:
+    branches:
+      - main # আপনার ব্রাঞ্চের নাম main না হয়ে master হলে সেটা দেবেন
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into VPS and Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          script: |
+            # VPS-এর যে ফোল্ডারে আপনার কোড থাকবে সেখানে যাবে
+            cd /root/ee-bot 
+            
+            # গিটহাব থেকে নতুন কোড টেনে আনবে
+            git pull origin main 
+            
+            # যদি নতুন কোনো প্যাকেজ থাকে তবে ইনস্টল করবে
+            npm install 
+            
+            # বট রিস্টার্ট দেবে
+            pm2 restart ee-bot
