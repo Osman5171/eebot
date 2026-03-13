@@ -22,7 +22,6 @@ const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 ঘণ্টা
 let apiBrowser;
 let apiPage;
 
-
 app.get('/', (req, res) => {
     res.send("<h1>🦅 EagleEye Master Bot is Active!</h1><p>Real-Time Sync and Auto Cleanup are running smoothly.</p>");
 });
@@ -32,13 +31,18 @@ app.get('/', (req, res) => {
 // =========================================================================
 
 async function initApiBrowser() {
-    console.log("🚀 Initializing Main Browser Engine...");
+    console.log("🚀 Initializing Main Browser Engine (Stealth Mode)...");
     try {
         if (apiBrowser) await apiBrowser.close(); 
 
         apiBrowser = await puppeteer.launch({ 
-            headless: "new", 
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--window-size=1920,1080'] 
+            headless: "new", // VPS-এর জন্য ব্যাকগ্রাউন্ড মোড
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage',
+                '--window-size=1920,1080'
+            ] 
         });
         
         apiPage = await apiBrowser.newPage();
@@ -134,7 +138,7 @@ app.post('/api/verify-cross-check', (req, res) => {
 });
 
 // =========================================================================
-// 🧹 PART 2: DUAL CLEANER SYSTEM (Runs in a new TAB to save RAM)
+// 🧹 PART 2: DUAL CLEANER SYSTEM (Runs in a new TAB)
 // =========================================================================
 
 async function cleanTopUpSite(browser) {
@@ -147,7 +151,7 @@ async function cleanTopUpSite(browser) {
         
         await page.goto(TOPUP_URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
         
-        // 🔥 Smart Login Check: ইমেইল বক্স থাকলে লগিন করবে, না থাকলে সরাসরি ডাটায় যাবে
+        // Smart Login Check
         const isEmailBoxThere = await page.$('input[type="email"]');
         if (isEmailBoxThere) {
             await page.type('input[type="email"]', TOPUP_USER);
@@ -160,12 +164,17 @@ async function cleanTopUpSite(browser) {
 
         let deletedCount = 0;
         let hasMore = true;
+        let pageNum = 1;
+
+        console.log("🔍 Scanning Top-Up Store Data pages...");
 
         while (hasMore) {
-            const targetRow = await page.evaluate(() => {
+            await new Promise(r => setTimeout(r, 2000)); 
+            
+            const targetRowIndex = await page.evaluate(() => {
                 const rows = Array.from(document.querySelectorAll('table tbody tr'));
                 const limitTime = Date.now() - (24 * 60 * 60 * 1000); 
-                const regex = /\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}:\d{1,2}\s*[AP]M/i; 
+                const regex = /\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}(:\d{1,2})?\s*[AP]M/i; 
 
                 for (let i = 0; i < rows.length; i++) {
                     const match = rows[i].innerText.match(regex);
@@ -176,8 +185,10 @@ async function cleanTopUpSite(browser) {
                         hh = parseInt(hh, 10);
                         if (ampm.toUpperCase() === 'PM' && hh < 12) hh += 12;
                         if (ampm.toUpperCase() === 'AM' && hh === 12) hh = 0;
+                        ss = ss ? parseInt(ss, 10) : 0;
                         
-                        const recordTimeBD = Date.UTC(y, m - 1, d, hh, parseInt(mm, 10), parseInt(ss, 10));
+                        // BD Time to UTC fix
+                        const recordTimeBD = Date.UTC(y, m - 1, d, hh, parseInt(mm, 10), ss);
                         const recordTimeRealUTC = recordTimeBD - (6 * 60 * 60 * 1000);
 
                         if (recordTimeRealUTC < limitTime) return i; 
@@ -186,19 +197,40 @@ async function cleanTopUpSite(browser) {
                 return -1; 
             });
 
-            if (targetRow !== -1) {
-                const btnSel = `table tbody tr:nth-child(${targetRow + 1}) .btn-danger, table tbody tr:nth-child(${targetRow + 1}) .fa-trash`;
+            if (targetRowIndex !== -1) {
+                const btnSel = `table tbody tr:nth-child(${targetRowIndex + 1}) .btn-danger, table tbody tr:nth-child(${targetRowIndex + 1}) .fa-trash, table tbody tr:nth-child(${targetRowIndex + 1}) [title="Delete"]`;
                 const btn = await page.$(btnSel);
+                
                 if (btn) {
                     await btn.click();
                     deletedCount++;
+                    process.stdout.write(`\r✅ Deleted Top-Up records: ${deletedCount}`);
                     await new Promise(r => setTimeout(r, 2000));
-                } else hasMore = false;
+                } else {
+                    hasMore = false;
+                }
             } else {
-                hasMore = false; 
+                // 🔥 Top-Up Next Page Check
+                const moved = await page.evaluate(() => {
+                    const nextBtn = Array.from(document.querySelectorAll('a.page-link, a[rel="next"]')).find(el => el.innerText.trim() === '›' || el.innerText.includes('Next'));
+                    if (nextBtn && !nextBtn.parentElement.classList.contains('disabled')) {
+                        nextBtn.click(); 
+                        return true;
+                    }
+                    return false;
+                });
+                
+                if (moved) {
+                    pageNum++;
+                    console.log(`\n➡️ Moving to Top-Up Page ${pageNum}...`);
+                    await new Promise(r => setTimeout(r, 4000)); 
+                } else {
+                    console.log(`\n⚠️ Top-Up: Reached last page. No more records found.`);
+                    hasMore = false; 
+                }
             }
         }
-        console.log(`✅ Top-Up Site Cleanup Done! Deleted: ${deletedCount} records.`);
+        console.log(`🎉 Top-Up Site Cleanup Done! Total Deleted: ${deletedCount}`);
     } catch (e) {
         console.log("❌ Error in Top-Up Cleanup:", e.message);
     } finally {
@@ -214,7 +246,7 @@ async function cleanUddoktaPay(browser) {
     try {
         await page.goto(UDDOKTAPAY_URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
         
-        // 🔥 Smart Login Check
+        // Smart Login Check
         const isEmailBoxThere = await page.$('input[type="email"]');
         if (isEmailBoxThere) {
             await page.type('input[type="email"]', UDDOKTAPAY_USER);
@@ -243,6 +275,7 @@ async function cleanUddoktaPay(browser) {
         });
         await new Promise(r => setTimeout(r, 4000)); 
 
+        // Date Column Enable
         const iconClicked = await page.evaluate(() => {
             const searchInputs = Array.from(document.querySelectorAll('input')).filter(i => i.placeholder && i.placeholder.includes('Search'));
             const tableSearch = searchInputs.length > 1 ? searchInputs[searchInputs.length - 1] : searchInputs[0];
@@ -274,24 +307,33 @@ async function cleanUddoktaPay(browser) {
             await new Promise(r => setTimeout(r, 1000));
         }
 
+        // 🔥 Perfected 50 Rows Selection (From your uddokta-cleaner.js)
+        console.log("➡️ Setting page limit to 50...");
         await page.evaluate(() => {
             const selects = document.querySelectorAll('select');
             for(let s of selects) {
-                if(s.innerText.includes('10')) { s.value = "50"; s.dispatchEvent(new Event('change', {bubbles: true})); return; }
+                if(s.innerText.includes('10')) { 
+                    s.value = "50"; 
+                    s.dispatchEvent(new Event('change', {bubbles: true})); 
+                    return; 
+                }
             }
-            const dropdowns = Array.from(document.querySelectorAll('div, button, span')).filter(e => e.innerText.trim() === '10' && e.closest('.flex'));
+            const dropdowns = Array.from(document.querySelectorAll('div, button, span')).filter(e => e.innerText.trim() === '10' && (e.parentElement.innerText.includes('Per page') || e.closest('.flex')));
             if(dropdowns.length > 0) {
                 dropdowns[0].click(); 
                 setTimeout(() => {
-                    const option50 = Array.from(document.querySelectorAll('li, span')).find(e => e.innerText.trim() === '50');
+                    const option50 = Array.from(document.querySelectorAll('li, span, div')).find(e => e.innerText.trim() === '50');
                     if (option50) option50.click();
                 }, 500);
             }
         });
-        await new Promise(r => setTimeout(r, 3000)); 
+        await new Promise(r => setTimeout(r, 4000)); 
 
         let deletedCount = 0;
         let hasMore = true;
+        let pageNum = 1;
+
+        console.log("🔍 Scanning UddoktaPay SMS pages...");
 
         while (hasMore) {
             await new Promise(r => setTimeout(r, 2000)); 
@@ -299,19 +341,20 @@ async function cleanUddoktaPay(browser) {
             const targetRowIndex = await page.evaluate(() => {
                 const rows = Array.from(document.querySelectorAll('table tbody tr'));
                 const limitTime = Date.now() - (24 * 60 * 60 * 1000); 
-                const regex = /\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}\s*[AP]M/i; 
+                const regex = /\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}(:\d{1,2})?\s*[AP]M/i; 
 
                 for (let i = 0; i < rows.length; i++) {
                     const match = rows[i].innerText.match(regex);
                     if (match) {
                         const [date, time, ampm] = match[0].split(' ');
                         const [y, m, d] = date.split('-');
-                        let [hh, mm] = time.split(':');
+                        let [hh, mm, ss] = time.split(':');
                         hh = parseInt(hh, 10);
                         if (ampm.toUpperCase() === 'PM' && hh < 12) hh += 12;
                         if (ampm.toUpperCase() === 'AM' && hh === 12) hh = 0;
+                        ss = ss ? parseInt(ss, 10) : 0;
                         
-                        const recordTimeBD = Date.UTC(y, m - 1, d, hh, parseInt(mm, 10), 0);
+                        const recordTimeBD = Date.UTC(y, m - 1, d, hh, parseInt(mm, 10), ss);
                         const recordTimeRealUTC = recordTimeBD - (6 * 60 * 60 * 1000);
 
                         if (recordTimeRealUTC < limitTime) return i; 
@@ -321,7 +364,7 @@ async function cleanUddoktaPay(browser) {
             });
 
             if (targetRowIndex !== -1) {
-                const btnSel = `table tbody tr:nth-child(${targetRowIndex + 1}) .btn-danger, table tbody tr:nth-child(${targetRowIndex + 1}) .fa-trash`;
+                const btnSel = `table tbody tr:nth-child(${targetRowIndex + 1}) .btn-danger, table tbody tr:nth-child(${targetRowIndex + 1}) .fa-trash, table tbody tr:nth-child(${targetRowIndex + 1}) button:last-child`;
                 const btn = await page.$(btnSel);
                 
                 if (btn) {
@@ -337,22 +380,36 @@ async function cleanUddoktaPay(browser) {
 
                     if (popupHandled) {
                         deletedCount++;
+                        process.stdout.write(`\r✅ Deleted UddoktaPay records: ${deletedCount}`);
                         await new Promise(r => setTimeout(r, 3000)); 
-                    } else hasMore = false;
-                } else hasMore = false;
+                    } else {
+                        hasMore = false;
+                    }
+                } else {
+                    hasMore = false;
+                }
             } else {
+                // 🔥 Perfected Next Page Check (From your uddokta-cleaner.js)
                 const moved = await page.evaluate(() => {
                     const nextBtn = Array.from(document.querySelectorAll('button, a')).find(el => el.innerText.trim() === 'Next');
                     if (nextBtn && !nextBtn.disabled && !nextBtn.classList.contains('disabled')) {
-                        nextBtn.click(); return true;
+                        nextBtn.click(); 
+                        return true;
                     }
                     return false;
                 });
-                if (moved) await new Promise(r => setTimeout(r, 4000)); 
-                else hasMore = false; 
+                
+                if (moved) {
+                    pageNum++;
+                    console.log(`\n➡️ Moving to UddoktaPay Page ${pageNum}...`);
+                    await new Promise(r => setTimeout(r, 4000)); 
+                } else {
+                    console.log(`\n⚠️ UddoktaPay: Reached last page. No more records found.`);
+                    hasMore = false; 
+                }
             }
         }
-        console.log(`✅ UddoktaPay Cleanup Done! Deleted: ${deletedCount} records.`);
+        console.log(`🎉 UddoktaPay Cleanup Done! Total Deleted: ${deletedCount}`);
     } catch (e) {
         console.log("❌ Error in UddoktaPay Cleanup:", e.message);
     } finally {
@@ -382,7 +439,7 @@ async function runDualCleaner() {
 // 🚀 SERVER START 
 // =========================================================================
 
-const PORT = 10000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, async () => {
     console.log(`\n🟢 EagleEye Master Bot live on port ${PORT}`);
     
