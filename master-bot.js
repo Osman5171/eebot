@@ -19,9 +19,14 @@ const UDDOKTAPAY_PASS = 'Na5171!!+payee5171';
 
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 ঘণ্টা
 
-// গ্লোবাল ভেরিয়েবল (শুধুমাত্র API এর জন্য)
+// গ্লোবাল ভেরিয়েবল (শুধুমাত্র API এর জন্য)
 let apiBrowser;
 let apiPage;
+
+// 🔥 হোম পেজ ফিক্স (যাতে Cannot GET / এরর না আসে)
+app.get('/', (req, res) => {
+    res.send("<h1>🦅 EagleEye Master Bot is Active!</h1><p>Real-Time Sync and Auto Cleanup are running smoothly.</p>");
+});
 
 // =========================================================================
 // 🟢 PART 1: REAL-TIME API SYSTEM (Always On)
@@ -160,7 +165,7 @@ async function cleanTopUpSite(browser) {
             const targetRow = await page.evaluate(() => {
                 const rows = Array.from(document.querySelectorAll('table tbody tr'));
                 const limitTime = Date.now() - (24 * 60 * 60 * 1000); 
-                const regex = /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [AP]M/; // Seconds included
+                const regex = /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [AP]M/i; // Seconds included
 
                 for (let i = 0; i < rows.length; i++) {
                     const match = rows[i].innerText.match(regex);
@@ -168,10 +173,15 @@ async function cleanTopUpSite(browser) {
                         const [date, time, ampm] = match[0].split(' ');
                         const [y, m, d] = date.split('-');
                         let [hh, mm, ss] = time.split(':');
-                        hh = parseInt(hh);
-                        if (ampm === 'PM' && hh < 12) hh += 12;
-                        if (ampm === 'AM' && hh === 12) hh = 0;
-                        if (new Date(y, m - 1, d, hh, parseInt(mm), parseInt(ss)).getTime() < limitTime) return i; 
+                        hh = parseInt(hh, 10);
+                        if (ampm.toUpperCase() === 'PM' && hh < 12) hh += 12;
+                        if (ampm.toUpperCase() === 'AM' && hh === 12) hh = 0;
+                        
+                        // 🔥 BD Time (+6) Convert to Real Server Time
+                        const recordTimeBD = Date.UTC(y, m - 1, d, hh, parseInt(mm, 10), parseInt(ss, 10));
+                        const recordTimeRealUTC = recordTimeBD - (6 * 60 * 60 * 1000);
+
+                        if (recordTimeRealUTC < limitTime) return i; 
                     }
                 }
                 return -1; 
@@ -186,7 +196,7 @@ async function cleanTopUpSite(browser) {
                     await new Promise(r => setTimeout(r, 2000));
                 } else hasMore = false;
             } else {
-                hasMore = false; // এখানে Next page লজিক লাগলে ভবিষ্যতে দেওয়া যাবে
+                hasMore = false; // Next page er dorkar hole pore add kora jabe
             }
         }
         console.log(`✅ Top-Up Site Cleanup Done! Deleted: ${deletedCount} records.`);
@@ -286,7 +296,7 @@ async function cleanUddoktaPay(browser) {
             const targetRowIndex = await page.evaluate(() => {
                 const rows = Array.from(document.querySelectorAll('table tbody tr'));
                 const limitTime = Date.now() - (24 * 60 * 60 * 1000); 
-                const regex = /\d{4}-\d{2}-\d{2} \d{2}:\d{2} [AP]M/; // No seconds here
+                const regex = /\d{4}-\d{2}-\d{2} \d{2}:\d{2} [AP]M/i; // No seconds here
 
                 for (let i = 0; i < rows.length; i++) {
                     const match = rows[i].innerText.match(regex);
@@ -294,10 +304,15 @@ async function cleanUddoktaPay(browser) {
                         const [date, time, ampm] = match[0].split(' ');
                         const [y, m, d] = date.split('-');
                         let [hh, mm] = time.split(':');
-                        hh = parseInt(hh);
-                        if (ampm === 'PM' && hh < 12) hh += 12;
-                        if (ampm === 'AM' && hh === 12) hh = 0;
-                        if (new Date(y, m - 1, d, hh, parseInt(mm), 0).getTime() < limitTime) return i; 
+                        hh = parseInt(hh, 10);
+                        if (ampm.toUpperCase() === 'PM' && hh < 12) hh += 12;
+                        if (ampm.toUpperCase() === 'AM' && hh === 12) hh = 0;
+                        
+                        // 🔥 BD Time (+6) Convert to Real Server Time
+                        const recordTimeBD = Date.UTC(y, m - 1, d, hh, parseInt(mm, 10), 0);
+                        const recordTimeRealUTC = recordTimeBD - (6 * 60 * 60 * 1000);
+
+                        if (recordTimeRealUTC < limitTime) return i; 
                     }
                 }
                 return -1; 
@@ -377,12 +392,12 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, async () => {
     console.log(`\n🟢 EagleEye Master Bot live on port ${PORT}`);
     
-    // ১. API ব্রাউজার চালু করা (সবসময় চলবে)
+    // ১. API ব্রাউজার চালু করা (সবসময় চলবে)
     await initApiBrowser();
 
-    // ২. ডুয়াল ক্লিনার চালু করা (৫ মিনিট পর প্রথমবার চলবে)
-    setTimeout(runDualCleaner, 5 * 60 * 1000);
+    // ২. ডুয়াল ক্লিনার চালু করা (চেক করার জন্য ২ মিনিট পর চলবে)
+    setTimeout(runDualCleaner, 2 * 60 * 1000);
 
-    // ৩. ডুয়াল ক্লিনার লুপ (প্রতি ১ ঘণ্টা পর পর চলবে)
+    // ৩. ডুয়াল ক্লিনার লুপ (প্রতি ১ ঘণ্টা পর পর চলবে)
     setInterval(runDualCleaner, CLEANUP_INTERVAL_MS);
 });
