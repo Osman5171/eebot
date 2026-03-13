@@ -1,9 +1,9 @@
-name: Deploy Bot to VPS
+name: Deploy Master Bot to VPS
 
 on:
   push:
     branches:
-      - main # আপনার ব্রাঞ্চের নাম main না হয়ে master হলে সেটা দেবেন
+      - main # আপনার ব্রাঞ্চের নাম main না হয়ে master হলে সেটা দেবেন
 
 jobs:
   deploy:
@@ -17,8 +17,8 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           port: 22
           script: |
-            # VPS-এর যে ফোল্ডারে আপনার কোড থাকবে সেখানে যাবে
-            cd /root/ee-bot 
+            # 🚀 VPS-এ আপনার ফোল্ডারের নাম (সাধারণত রিপোজিটরির নামেই হয়)
+            cd /root/eebot 
             
             # গিটহাব থেকে নতুন কোড টেনে আনবে
             git pull origin main 
@@ -26,5 +26,5 @@ jobs:
             # যদি নতুন কোনো প্যাকেজ থাকে তবে ইনস্টল করবে
             npm install 
             
-            # বট রিস্টার্ট দেবে
-            pm2 restart ee-bot
+            # 🚀 আমাদের নতুন মাস্টার বট রিস্টার্ট দেবে
+            pm2 restart EagleEye-MasterBot
