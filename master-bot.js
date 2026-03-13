@@ -33,13 +33,13 @@ app.get('/', (req, res) => {
 // =========================================================================
 
 async function initApiBrowser() {
-    console.log("🚀 Initializing API Browser (Always ON) for Real-Time Sync...");
+    console.log("🚀 Initializing Main Browser Engine...");
     try {
         if (apiBrowser) await apiBrowser.close(); 
 
         apiBrowser = await puppeteer.launch({ 
             headless: "new", 
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--window-size=1920,1080'] 
         });
         
         apiPage = await apiBrowser.newPage();
@@ -138,13 +138,13 @@ app.post('/api/verify-cross-check', (req, res) => {
 });
 
 // =========================================================================
-// 🧹 PART 2: DUAL CLEANER SYSTEM (Runs periodically, then destroys itself)
+// 🧹 PART 2: DUAL CLEANER SYSTEM (Runs in a new TAB to save RAM)
 // =========================================================================
 
 // 🧹 টাস্ক ১: টপ-আপ সাইট ক্লিন করা
 async function cleanTopUpSite(browser) {
     console.log("\n▶️ [TASK 1] Starting Top-Up Site 24h Cleanup...");
-    const page = await browser.newPage();
+    const page = await browser.newPage(); // 🔥 নতুন ট্যাব
     await page.setViewport({ width: 1920, height: 1080 });
     
     try {
@@ -165,7 +165,8 @@ async function cleanTopUpSite(browser) {
             const targetRow = await page.evaluate(() => {
                 const rows = Array.from(document.querySelectorAll('table tbody tr'));
                 const limitTime = Date.now() - (24 * 60 * 60 * 1000); 
-                const regex = /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [AP]M/i; // Seconds included
+                // 🔥 Fix: Single/Double digits date & time
+                const regex = /\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}:\d{1,2}\s*[AP]M/i; 
 
                 for (let i = 0; i < rows.length; i++) {
                     const match = rows[i].innerText.match(regex);
@@ -177,7 +178,7 @@ async function cleanTopUpSite(browser) {
                         if (ampm.toUpperCase() === 'PM' && hh < 12) hh += 12;
                         if (ampm.toUpperCase() === 'AM' && hh === 12) hh = 0;
                         
-                        // 🔥 BD Time (+6) Convert to Real Server Time
+                        // 🔥 BD Time (+6) Convert to Server UTC
                         const recordTimeBD = Date.UTC(y, m - 1, d, hh, parseInt(mm, 10), parseInt(ss, 10));
                         const recordTimeRealUTC = recordTimeBD - (6 * 60 * 60 * 1000);
 
@@ -196,21 +197,21 @@ async function cleanTopUpSite(browser) {
                     await new Promise(r => setTimeout(r, 2000));
                 } else hasMore = false;
             } else {
-                hasMore = false; // Next page er dorkar hole pore add kora jabe
+                hasMore = false; 
             }
         }
         console.log(`✅ Top-Up Site Cleanup Done! Deleted: ${deletedCount} records.`);
     } catch (e) {
         console.log("❌ Error in Top-Up Cleanup:", e.message);
     } finally {
-        await page.close(); 
+        await page.close(); // 🔥 কাজ শেষে ট্যাব ক্লোজ
     }
 }
 
 // 🧹 টাস্ক ২: UddoktaPay ক্লিন করা
 async function cleanUddoktaPay(browser) {
     console.log("\n▶️ [TASK 2] Starting UddoktaPay SMS 24h Cleanup...");
-    const page = await browser.newPage();
+    const page = await browser.newPage(); // 🔥 নতুন ট্যাব
     await page.setViewport({ width: 1920, height: 1080 });
     
     try {
@@ -296,7 +297,8 @@ async function cleanUddoktaPay(browser) {
             const targetRowIndex = await page.evaluate(() => {
                 const rows = Array.from(document.querySelectorAll('table tbody tr'));
                 const limitTime = Date.now() - (24 * 60 * 60 * 1000); 
-                const regex = /\d{4}-\d{2}-\d{2} \d{2}:\d{2} [AP]M/i; // No seconds here
+                // 🔥 Fix: Single/Double digits date & time
+                const regex = /\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}\s*[AP]M/i; // No seconds here
 
                 for (let i = 0; i < rows.length; i++) {
                     const match = rows[i].innerText.match(regex);
@@ -354,33 +356,26 @@ async function cleanUddoktaPay(browser) {
     } catch (e) {
         console.log("❌ Error in UddoktaPay Cleanup:", e.message);
     } finally {
-        await page.close(); 
+        await page.close(); // 🔥 কাজ শেষে ট্যাব ক্লোজ
     }
 }
 
-// 🚀 মাস্টার কন্ট্রোলার (Ghost Browser)
+// 🚀 মাস্টার কন্ট্রোলার (Tab System - NO NEW BROWSER)
 async function runDualCleaner() {
     console.log(`\n==================================================`);
-    console.log(`🧹 [${new Date().toLocaleString()}] Waking up Cleaner Browser...`);
+    console.log(`🧹 [${new Date().toLocaleString()}] Opening cleanup tabs in Main Browser...`);
     
-    let cleanerBrowser;
     try {
-        cleanerBrowser = await puppeteer.launch({ 
-            headless: "new", 
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
-        });
-
-        await cleanTopUpSite(cleanerBrowser);
-        await cleanUddoktaPay(cleanerBrowser);
+        if (!apiBrowser) await initApiBrowser();
+        
+        await cleanTopUpSite(apiBrowser);
+        await cleanUddoktaPay(apiBrowser);
 
     } catch (error) {
         console.log("❌ Fatal Error in Dual Cleanup:", error.message);
     } finally {
-        if (cleanerBrowser) {
-            await cleanerBrowser.close(); 
-            console.log("👻 Cleaner Browser completely destroyed. RAM freed.");
-            console.log(`==================================================\n`);
-        }
+        console.log("👻 Cleanup tabs closed. RAM safe.");
+        console.log(`==================================================\n`);
     }
 }
 
@@ -395,8 +390,8 @@ app.listen(PORT, async () => {
     // ১. API ব্রাউজার চালু করা (সবসময় চলবে)
     await initApiBrowser();
 
-    // ২. ডুয়াল ক্লিনার চালু করা (চেক করার জন্য ২ মিনিট পর চলবে)
-    setTimeout(runDualCleaner, 2 * 60 * 1000);
+    // ২. ডুয়াল ক্লিনার চালু করা (চেক করার জন্য ১ মিনিট পর চলবে)
+    setTimeout(runDualCleaner, 1 * 60 * 1000);
 
     // ৩. ডুয়াল ক্লিনার লুপ (প্রতি ১ ঘণ্টা পর পর চলবে)
     setInterval(runDualCleaner, CLEANUP_INTERVAL_MS);
