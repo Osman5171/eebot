@@ -17,7 +17,7 @@ const UDDOKTAPAY_URL_LOGIN = 'https://pay.eagleeyeesports.com/public/admin/login
 const UDDOKTAPAY_USER = 'nahidulislam5171@gmail.com';
 const UDDOKTAPAY_PASS = 'Na5171!!+payee5171'; 
 
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 ঘণ্টা
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; 
 
 let apiBrowser;
 let apiPage;
@@ -36,7 +36,7 @@ async function initApiBrowser() {
         if (apiBrowser) await apiBrowser.close(); 
 
         apiBrowser = await puppeteer.launch({ 
-            headless: "new", // VPS-এর জন্য ব্যাকগ্রাউন্ড মোড
+            headless: "new", 
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
@@ -138,7 +138,7 @@ app.post('/api/verify-cross-check', (req, res) => {
 });
 
 // =========================================================================
-// 🧹 PART 2: DUAL CLEANER SYSTEM (Runs in a new TAB)
+// 🧹 PART 2: DUAL CLEANER SYSTEM (Anti-Crash Version)
 // =========================================================================
 
 async function cleanTopUpSite(browser) {
@@ -151,7 +151,6 @@ async function cleanTopUpSite(browser) {
         
         await page.goto(TOPUP_URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
         
-        // Smart Login Check
         const isEmailBoxThere = await page.$('input[type="email"]');
         if (isEmailBoxThere) {
             await page.type('input[type="email"]', TOPUP_USER);
@@ -187,7 +186,6 @@ async function cleanTopUpSite(browser) {
                         if (ampm.toUpperCase() === 'AM' && hh === 12) hh = 0;
                         ss = ss ? parseInt(ss, 10) : 0;
                         
-                        // BD Time to UTC fix
                         const recordTimeBD = Date.UTC(y, m - 1, d, hh, parseInt(mm, 10), ss);
                         const recordTimeRealUTC = recordTimeBD - (6 * 60 * 60 * 1000);
 
@@ -204,13 +202,15 @@ async function cleanTopUpSite(browser) {
                 if (btn) {
                     await btn.click();
                     deletedCount++;
-                    process.stdout.write(`\r✅ Deleted Top-Up records: ${deletedCount}`);
+                    console.log(`✅ Deleted Top-Up records: ${deletedCount}`);
+                    
+                    // 🔥 SAFETY BREAK: সার্ভার ক্র্যাশ রোধ করতে ২ সেকেন্ড অপেক্ষা
+                    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
                     await new Promise(r => setTimeout(r, 2000));
                 } else {
                     hasMore = false;
                 }
             } else {
-                // 🔥 Top-Up Next Page Check
                 const moved = await page.evaluate(() => {
                     const nextBtn = Array.from(document.querySelectorAll('a.page-link, a[rel="next"]')).find(el => el.innerText.trim() === '›' || el.innerText.includes('Next'));
                     if (nextBtn && !nextBtn.parentElement.classList.contains('disabled')) {
@@ -246,7 +246,6 @@ async function cleanUddoktaPay(browser) {
     try {
         await page.goto(UDDOKTAPAY_URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
         
-        // Smart Login Check
         const isEmailBoxThere = await page.$('input[type="email"]');
         if (isEmailBoxThere) {
             await page.type('input[type="email"]', UDDOKTAPAY_USER);
@@ -268,6 +267,7 @@ async function cleanUddoktaPay(browser) {
         await clickByText('SMS Data');
         await new Promise(r => setTimeout(r, 3000)); 
 
+        console.log("➡️ Selecting 'Approved' folder...");
         await page.evaluate(() => {
             const tabs = Array.from(document.querySelectorAll('a, button, li, span.nav-link, label.btn'));
             const approvedTab = tabs.find(tab => tab.innerText.trim().startsWith('Approved'));
@@ -275,7 +275,8 @@ async function cleanUddoktaPay(browser) {
         });
         await new Promise(r => setTimeout(r, 4000)); 
 
-        // Date Column Enable
+        // 🔥 MISSING MAGIC CODE: Date Column Enable (0 Records Fix)
+        console.log("➡️ Enabling 'Date' column...");
         const iconClicked = await page.evaluate(() => {
             const searchInputs = Array.from(document.querySelectorAll('input')).filter(i => i.placeholder && i.placeholder.includes('Search'));
             const tableSearch = searchInputs.length > 1 ? searchInputs[searchInputs.length - 1] : searchInputs[0];
@@ -288,6 +289,12 @@ async function cleanUddoktaPay(browser) {
                     const buttons = Array.from(container.parentElement.querySelectorAll('button')).filter(btn => btn.querySelector('svg'));
                     if (buttons.length > 0) { buttons[buttons.length - 1].click(); return true; }
                 }
+            }
+            
+            const allIconButtons = Array.from(document.querySelectorAll('button')).filter(btn => btn.querySelector('svg') && !btn.innerText.trim());
+            if (allIconButtons.length > 0) {
+                allIconButtons[allIconButtons.length - 1].click();
+                return true;
             }
             return false;
         });
@@ -307,7 +314,6 @@ async function cleanUddoktaPay(browser) {
             await new Promise(r => setTimeout(r, 1000));
         }
 
-        // 🔥 Perfected 50 Rows Selection (From your uddokta-cleaner.js)
         console.log("➡️ Setting page limit to 50...");
         await page.evaluate(() => {
             const selects = document.querySelectorAll('select');
@@ -370,6 +376,9 @@ async function cleanUddoktaPay(browser) {
                 if (btn) {
                     page.once('dialog', async d => await d.accept().catch(() => {}));
                     await btn.click();
+                    
+                    // 🔥 SAFETY BREAK: সার্ভার ক্র্যাশ রোধ
+                    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
                     await new Promise(r => setTimeout(r, 1500));
                     
                     const popupHandled = await page.evaluate(() => {
@@ -380,8 +389,9 @@ async function cleanUddoktaPay(browser) {
 
                     if (popupHandled) {
                         deletedCount++;
-                        process.stdout.write(`\r✅ Deleted UddoktaPay records: ${deletedCount}`);
-                        await new Promise(r => setTimeout(r, 3000)); 
+                        console.log(`✅ Deleted UddoktaPay records: ${deletedCount}`); 
+                        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+                        await new Promise(r => setTimeout(r, 2000)); 
                     } else {
                         hasMore = false;
                     }
@@ -389,7 +399,6 @@ async function cleanUddoktaPay(browser) {
                     hasMore = false;
                 }
             } else {
-                // 🔥 Perfected Next Page Check (From your uddokta-cleaner.js)
                 const moved = await page.evaluate(() => {
                     const nextBtn = Array.from(document.querySelectorAll('button, a')).find(el => el.innerText.trim() === 'Next');
                     if (nextBtn && !nextBtn.disabled && !nextBtn.classList.contains('disabled')) {
