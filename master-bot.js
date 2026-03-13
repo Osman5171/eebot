@@ -19,11 +19,9 @@ const UDDOKTAPAY_PASS = 'Na5171!!+payee5171';
 
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 ঘণ্টা
 
-// গ্লোবাল ভেরিয়েবল (শুধুমাত্র API এর জন্য)
 let apiBrowser;
 let apiPage;
 
-// 🔥 হোম পেজ ফিক্স (যাতে Cannot GET / এরর না আসে)
 app.get('/', (req, res) => {
     res.send("<h1>🦅 EagleEye Master Bot is Active!</h1><p>Real-Time Sync and Auto Cleanup are running smoothly.</p>");
 });
@@ -46,7 +44,6 @@ async function initApiBrowser() {
         await apiPage.setViewport({ width: 1920, height: 1080 });
         await apiPage.setDefaultNavigationTimeout(30000); 
 
-        // পপআপ অটো একসেপ্ট
         apiPage.on('dialog', async dialog => {
             await dialog.accept().catch(() => {});
         });
@@ -66,7 +63,6 @@ async function initApiBrowser() {
     }
 }
 
-// 🌐 API 1: Check Used Status
 app.post('/api/check-used-status', async (req, res) => {
     const targetTrxID = req.body.transaction_id;
     if (!targetTrxID) return res.status(400).json({ error: "No ID provided" });
@@ -92,7 +88,6 @@ app.post('/api/check-used-status', async (req, res) => {
     }
 });
 
-// 🌐 API 2: Verify Cross Check & Targeted Delete
 app.post('/api/verify-cross-check', (req, res) => {
     const targetTrxID = req.body.transaction_id;
     if (!targetTrxID) return res.status(400).json({ error: "No ID provided" });
@@ -141,19 +136,23 @@ app.post('/api/verify-cross-check', (req, res) => {
 // 🧹 PART 2: DUAL CLEANER SYSTEM (Runs in a new TAB to save RAM)
 // =========================================================================
 
-// 🧹 টাস্ক ১: টপ-আপ সাইট ক্লিন করা
 async function cleanTopUpSite(browser) {
     console.log("\n▶️ [TASK 1] Starting Top-Up Site 24h Cleanup...");
-    const page = await browser.newPage(); // 🔥 নতুন ট্যাব
+    const page = await browser.newPage(); 
     await page.setViewport({ width: 1920, height: 1080 });
     
     try {
         page.on('dialog', async dialog => await dialog.accept().catch(() => {}));
         
         await page.goto(TOPUP_URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.type('input[type="email"]', TOPUP_USER);
-        await page.type('input[type="password"]', TOPUP_PASS);
-        await Promise.all([ page.waitForNavigation(), page.click('button[type="submit"]') ]);
+        
+        // 🔥 Smart Login Check: ইমেইল বক্স থাকলে লগিন করবে, না থাকলে সরাসরি ডাটায় যাবে
+        const isEmailBoxThere = await page.$('input[type="email"]');
+        if (isEmailBoxThere) {
+            await page.type('input[type="email"]', TOPUP_USER);
+            await page.type('input[type="password"]', TOPUP_PASS);
+            await Promise.all([ page.waitForNavigation(), page.click('button[type="submit"]') ]);
+        }
 
         await page.goto('https://pay.eagleeyetopup.com/storedatum', { waitUntil: 'domcontentloaded' });
         await new Promise(r => setTimeout(r, 3000));
@@ -165,7 +164,6 @@ async function cleanTopUpSite(browser) {
             const targetRow = await page.evaluate(() => {
                 const rows = Array.from(document.querySelectorAll('table tbody tr'));
                 const limitTime = Date.now() - (24 * 60 * 60 * 1000); 
-                // 🔥 Fix: Single/Double digits date & time
                 const regex = /\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}:\d{1,2}\s*[AP]M/i; 
 
                 for (let i = 0; i < rows.length; i++) {
@@ -178,7 +176,6 @@ async function cleanTopUpSite(browser) {
                         if (ampm.toUpperCase() === 'PM' && hh < 12) hh += 12;
                         if (ampm.toUpperCase() === 'AM' && hh === 12) hh = 0;
                         
-                        // 🔥 BD Time (+6) Convert to Server UTC
                         const recordTimeBD = Date.UTC(y, m - 1, d, hh, parseInt(mm, 10), parseInt(ss, 10));
                         const recordTimeRealUTC = recordTimeBD - (6 * 60 * 60 * 1000);
 
@@ -204,22 +201,26 @@ async function cleanTopUpSite(browser) {
     } catch (e) {
         console.log("❌ Error in Top-Up Cleanup:", e.message);
     } finally {
-        await page.close(); // 🔥 কাজ শেষে ট্যাব ক্লোজ
+        await page.close(); 
     }
 }
 
-// 🧹 টাস্ক ২: UddoktaPay ক্লিন করা
 async function cleanUddoktaPay(browser) {
     console.log("\n▶️ [TASK 2] Starting UddoktaPay SMS 24h Cleanup...");
-    const page = await browser.newPage(); // 🔥 নতুন ট্যাব
+    const page = await browser.newPage(); 
     await page.setViewport({ width: 1920, height: 1080 });
     
     try {
         await page.goto(UDDOKTAPAY_URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.type('input[type="email"]', UDDOKTAPAY_USER);
-        await page.type('input[type="password"]', UDDOKTAPAY_PASS); 
-        await page.click('button[type="submit"]');
-        await page.waitForNavigation({ waitUntil: 'domcontentloaded' });
+        
+        // 🔥 Smart Login Check
+        const isEmailBoxThere = await page.$('input[type="email"]');
+        if (isEmailBoxThere) {
+            await page.type('input[type="email"]', UDDOKTAPAY_USER);
+            await page.type('input[type="password"]', UDDOKTAPAY_PASS); 
+            await page.click('button[type="submit"]');
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded' });
+        }
 
         const clickByText = async (text) => {
             await page.evaluate((t) => {
@@ -297,8 +298,7 @@ async function cleanUddoktaPay(browser) {
             const targetRowIndex = await page.evaluate(() => {
                 const rows = Array.from(document.querySelectorAll('table tbody tr'));
                 const limitTime = Date.now() - (24 * 60 * 60 * 1000); 
-                // 🔥 Fix: Single/Double digits date & time
-                const regex = /\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}\s*[AP]M/i; // No seconds here
+                const regex = /\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}\s*[AP]M/i; 
 
                 for (let i = 0; i < rows.length; i++) {
                     const match = rows[i].innerText.match(regex);
@@ -310,7 +310,6 @@ async function cleanUddoktaPay(browser) {
                         if (ampm.toUpperCase() === 'PM' && hh < 12) hh += 12;
                         if (ampm.toUpperCase() === 'AM' && hh === 12) hh = 0;
                         
-                        // 🔥 BD Time (+6) Convert to Real Server Time
                         const recordTimeBD = Date.UTC(y, m - 1, d, hh, parseInt(mm, 10), 0);
                         const recordTimeRealUTC = recordTimeBD - (6 * 60 * 60 * 1000);
 
@@ -356,11 +355,10 @@ async function cleanUddoktaPay(browser) {
     } catch (e) {
         console.log("❌ Error in UddoktaPay Cleanup:", e.message);
     } finally {
-        await page.close(); // 🔥 কাজ শেষে ট্যাব ক্লোজ
+        await page.close(); 
     }
 }
 
-// 🚀 মাস্টার কন্ট্রোলার (Tab System - NO NEW BROWSER)
 async function runDualCleaner() {
     console.log(`\n==================================================`);
     console.log(`🧹 [${new Date().toLocaleString()}] Opening cleanup tabs in Main Browser...`);
@@ -380,19 +378,17 @@ async function runDualCleaner() {
 }
 
 // =========================================================================
-// 🚀 SERVER START & SCHEDULING
+// 🚀 SERVER START 
 // =========================================================================
 
-const PORT = process.env.PORT || 10000;
+const PORT = 10000;
 app.listen(PORT, async () => {
     console.log(`\n🟢 EagleEye Master Bot live on port ${PORT}`);
     
-    // ১. API ব্রাউজার চালু করা (সবসময় চলবে)
     await initApiBrowser();
 
-    // ২. ডুয়াল ক্লিনার চালু করা (চেক করার জন্য ১ মিনিট পর চলবে)
+    // ১ মিনিট পর ডাটা ক্লিন করা শুরু করবে
     setTimeout(runDualCleaner, 1 * 60 * 1000);
 
-    // ৩. ডুয়াল ক্লিনার লুপ (প্রতি ১ ঘণ্টা পর পর চলবে)
     setInterval(runDualCleaner, CLEANUP_INTERVAL_MS);
 });
